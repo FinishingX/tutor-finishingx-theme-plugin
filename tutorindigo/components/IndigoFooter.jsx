@@ -1,4 +1,3 @@
-
 const IndigoFooter = () => {
   const intl = useIntl();
   const config = getConfig();
@@ -34,28 +33,18 @@ const IndigoFooter = () => {
         <div className="footer-top">
           <div className="powered-area">
             <ul className="logo-list">
-              <li>{intl.formatMessage(messages["footer.poweredby.text"])}</li>
               <li>
                 <a
-                  href="https://edly.io/tutor/"
+                  href="${config.LMS_BASE_URL}"
                   rel="noreferrer"
                   target="_blank"
                 >
                   <img
-                    src={`${config.LMS_BASE_URL}/theming/asset/images/tutor-logo.png`}
+                    src={`${config.LMS_BASE_URL}/static/indigo/images/logo.png`}
                     alt={intl.formatMessage(
                       messages["footer.tutorlogo.altText"]
                     )}
                     width="57"
-                  />
-                </a>
-              </li>
-              <li>
-                <a href="https://open.edx.org" rel="noreferrer" target="_blank">
-                  <img
-                    src={`${config.LMS_BASE_URL}/theming/asset/images/openedx-logo.png`}
-                    alt={intl.formatMessage(messages["footer.logo.altText"])}
-                    width="79"
                   />
                 </a>
               </li>
