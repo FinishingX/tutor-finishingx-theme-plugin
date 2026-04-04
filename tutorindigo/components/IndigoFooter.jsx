@@ -35,9 +35,8 @@ const IndigoFooter = () => {
             <ul className="logo-list">
               <li>
                 <a
-                  href="${config.LMS_BASE_URL}"
+                  href="/"
                   rel="noreferrer"
-                  target="_blank"
                 >
                   <img
                     src={`${config.LMS_BASE_URL}/static/indigo/images/logo.png`}
