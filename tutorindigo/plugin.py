@@ -228,6 +228,21 @@ for mfe in indigo_styled_mfes:
   """,
         ),
     )
+
+PLUGIN_SLOTS.add_items(
+    [
+        (
+            "learning",
+            "learning_help_slot",
+            """
+        {
+            op: PLUGIN_OPERATIONS.Hide,
+            widgetId: 'default_contents',
+        }
+        """,
+        )
+    ]
+)
 paragon_theme_urls = {
     "variants": {
         "light": {
