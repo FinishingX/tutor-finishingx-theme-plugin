@@ -2,3 +2,6 @@
 {{- patch("MobileViewHeader.jsx") }}
 {{- patch("ThemedLogo.jsx") }}
 {{- patch("ToggleThemeButton.jsx") }}
+{{- patch("HeaderTranslations.jsx") }}
+{{- patch("LanguageMenu.jsx") }}
+{{- patch("CustomHeader.jsx") }}

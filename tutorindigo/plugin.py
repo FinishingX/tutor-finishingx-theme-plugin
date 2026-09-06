@@ -26,6 +26,21 @@ config: t.Dict[str, t.Dict[str, t.Any]] = {
         "WELCOME_MESSAGE": "The place for all your online learning",
         "PRIMARY_COLOR": "#6EACAF",
         "ENABLE_DARK_TOGGLE": False,
+        "ENABLE_LANGUAGE_MENU": True,
+        # Languages shown in the header language dropdown (CustomHeader /
+        # LanguageMenu). "value" is set verbatim into the
+        # LANGUAGE_PREFERENCE_COOKIE_NAME cookie, which both the MFEs
+        # (frontend-platform i18n) and edx-platform's LocaleMiddleware read.
+        # de-de matches this platform's LANGUAGE_CODE (see edx-platform's
+        # CLAUDE.md) so it round-trips through Django with no extra config;
+        # showing German MFE strings additionally requires German message
+        # catalogs to actually be pulled into the MFE images (Atlas/Transifex
+        # at image-build time) — a separate, already-flagged translations
+        # pipeline concern, not something this menu can fix on its own.
+        "SUPPORTED_LANGUAGES": [
+            {"value": "en", "label": "English"},
+            {"value": "de-de", "label": "Deutsch"},
+        ],
         # Footer links are dictionaries with a "title" and "url"
         # To remove all links, run:
         # tutor config save --set INDIGO_FOOTER_NAV_LINKS=[]
@@ -172,6 +187,8 @@ for filename in javascript_files:
         PIPELINE['JAVASCRIPT'][filename]['source_filenames'] += dark_theme_filepath
 
 MFE_CONFIG['INDIGO_ENABLE_DARK_TOGGLE'] = {{ INDIGO_ENABLE_DARK_TOGGLE }}
+MFE_CONFIG['INDIGO_ENABLE_LANGUAGE_MENU'] = {{ INDIGO_ENABLE_LANGUAGE_MENU }}
+MFE_CONFIG['INDIGO_SUPPORTED_LANGUAGES'] = {{ INDIGO_SUPPORTED_LANGUAGES }}
 MFE_CONFIG['INDIGO_FOOTER_NAV_LINKS'] = {{ INDIGO_FOOTER_NAV_LINKS }}
 """,
         ),
@@ -179,6 +196,8 @@ MFE_CONFIG['INDIGO_FOOTER_NAV_LINKS'] = {{ INDIGO_FOOTER_NAV_LINKS }}
             "openedx-lms-production-settings",
             """
 MFE_CONFIG['INDIGO_ENABLE_DARK_TOGGLE'] = {{ INDIGO_ENABLE_DARK_TOGGLE }}
+MFE_CONFIG['INDIGO_ENABLE_LANGUAGE_MENU'] = {{ INDIGO_ENABLE_LANGUAGE_MENU }}
+MFE_CONFIG['INDIGO_SUPPORTED_LANGUAGES'] = {{ INDIGO_SUPPORTED_LANGUAGES }}
 MFE_CONFIG['INDIGO_FOOTER_NAV_LINKS'] = {{ INDIGO_FOOTER_NAV_LINKS }}
 """,
         ),
@@ -229,6 +248,139 @@ for mfe in indigo_styled_mfes:
         ),
     )
 
+
+# ---------------------------------------------------------------------------
+# Header overrides — replace the native header with the FinishingX marketing
+# header (CustomHeader) on every Indigo-styled MFE. Ported from the TitanEd/
+# tels tutor-indigo fork; adapted because FinishingX has no "public" marketing
+# MFE (marketing pages are ulmo-theme Mako templates on the LMS domain, see
+# CustomHeader.jsx) and no Control Hub app.
+#
+# Slot ids are NOT interchangeable — applying header_desktop.v1 to an MFE that
+# renders <LearningHeader/> (or header_learning.v1 to one that never mounts
+# that slot) silently no-ops, it does not fall back to the other family:
+#   account / profile / gradebook / learner-dashboard
+#       -> native <Header/> only (DesktopHeaderSlot + MobileHeaderSlot,
+#          i.e. org.openedx.frontend.layout.header_desktop.v1 / _mobile.v1)
+#   learning
+#       -> both: <LearningHeader/> on course pages via its own HeaderSlot
+#          (org.openedx.frontend.layout.header_learning.v1), AND native
+#          <Header/> on a few plain pages (e.g. preferences-unsubscribe)
+#   discussions / communications / ora-grading
+#       -> <LearningHeader/> only, but (unlike frontend-app-learning) these
+#          MFEs don't wrap it in a PluginSlot upstream, so header_learning.v1
+#          is injected at image-build time instead (see
+#          LEARNING_HEADER_WRAP_FILES below).
+# authn has no site header; authoring/Studio keeps its own StudioHeader —
+# neither gets an entry here, matching prior behavior.
+# ---------------------------------------------------------------------------
+
+_DESKTOP_HEADER_SLOTS: list[tuple[str, str]] = [
+    ("org.openedx.frontend.layout.header_desktop.v1", "custom_header_desktop"),
+    ("org.openedx.frontend.layout.header_mobile.v1", "custom_header_mobile"),
+]
+
+_LEARNING_HEADER_SLOTS: list[tuple[str, str]] = [
+    ("org.openedx.frontend.layout.header_learning.v1", "custom_header_learning"),
+]
+
+# mfe -> [(slot_id, widget_id)]
+HEADER_REPLACEMENT_SLOTS: dict[str, list[tuple[str, str]]] = {
+    "account": _DESKTOP_HEADER_SLOTS,
+    "profile": _DESKTOP_HEADER_SLOTS,
+    "gradebook": _DESKTOP_HEADER_SLOTS,
+    "learner-dashboard": _DESKTOP_HEADER_SLOTS,
+    "learning": _LEARNING_HEADER_SLOTS + _DESKTOP_HEADER_SLOTS,
+    "discussions": _LEARNING_HEADER_SLOTS,
+    "communications": _LEARNING_HEADER_SLOTS,
+    "ora-grading": _LEARNING_HEADER_SLOTS,
+}
+
+
+def _custom_header_plugins(widget_id: str) -> str:
+    return f"""
+            {{
+                op: PLUGIN_OPERATIONS.Hide,
+                widgetId: 'default_contents',
+            }},
+            {{
+                op: PLUGIN_OPERATIONS.Insert,
+                widget: {{
+                    id: '{widget_id}',
+                    type: DIRECT_PLUGIN,
+                    priority: 1,
+                    RenderWidget: CustomHeader,
+                }},
+            }},
+"""
+
+
+for mfe, _slots in HEADER_REPLACEMENT_SLOTS.items():
+    for slot_id, widget_id in _slots:
+        PLUGIN_SLOTS.add_item((mfe, slot_id, _custom_header_plugins(widget_id)))
+
+
+# LearningHeader apps that don't mount header_learning.v1 in upstream source
+# (discussions/communications/ora-grading). Wrap their <Header /> at image
+# build time (after COPY of the MFE source, right before `npm run build`, via
+# the mfe-dockerfile-pre-npm-build-{mfe} hook) so the PLUGIN_SLOTS entries
+# above have a slot to attach to — no MFE-side git fork required. Fails the
+# image build loudly if the expected import/JSX shape isn't found, rather
+# than silently no-op-ing.
+#
+# NOTE: these 3 MFEs aren't checked out in this workspace, so the relative
+# paths below (matching the upstream file layout at the time of writing)
+# should be double-checked against FinishingX's actual forks before relying
+# on this in a real build.
+LEARNING_HEADER_WRAP_FILES = {
+    "discussions": "src/discussions/discussions-home/DiscussionsHome.jsx",
+    "communications": "src/components/page-container/PageContainer.jsx",
+    "ora-grading": "src/App.jsx",
+}
+
+
+def _learning_header_wrap_dockerfile(relpath: str) -> str:
+    path_js = json.dumps(relpath)
+    return f"""
+RUN node <<'EOF'
+const fs = require('fs');
+const p = {path_js};
+let t = fs.readFileSync(p, 'utf8');
+if (t.includes('org.openedx.frontend.layout.header_learning.v1')) {{
+  process.exit(0);
+}}
+const headerFrom = "from '@edx/frontend-component-header';";
+const headerImport = "import {{ LearningHeader as Header }} " + headerFrom;
+if (!t.includes(headerImport)) {{
+  console.error('CustomHeader wrap: LearningHeader import not found in', p);
+  process.exit(1);
+}}
+const fpfImport = "import {{ PluginSlot }} from '@openedx/frontend-plugin-framework';";
+if (!t.includes('@openedx/frontend-plugin-framework')) {{
+  t = t.replace(headerImport, fpfImport + "\\n" + headerImport);
+}}
+const slotId = 'org.openedx.frontend.layout.header_learning.v1';
+const wrapped = t.replace(
+  /<Header([\\s\\S]*?)\\/>/,
+  '<PluginSlot id="' + slotId + '"><Header$1/></PluginSlot>'
+);
+if (wrapped === t) {{
+  console.error('CustomHeader wrap: <Header /> not found in', p);
+  process.exit(1);
+}}
+fs.writeFileSync(p, wrapped);
+console.log('Wrapped LearningHeader in', p);
+EOF
+"""
+
+
+for _mfe, _relpath in LEARNING_HEADER_WRAP_FILES.items():
+    _patch_name = f"mfe-dockerfile-pre-npm-build-{_mfe}"
+    hooks.Filters.ENV_PATCHES.add_item(
+        (_patch_name, _learning_header_wrap_dockerfile(_relpath))
+    )
+
+
 PLUGIN_SLOTS.add_items(
     [
         (
@@ -247,14 +399,14 @@ paragon_theme_urls = {
     "variants": {
         "light": {
             "urls": {
-                "default": "https://raw.githubusercontent.com/edly-io/brand-openedx/refs/heads/ulmo/indigo/dist/light.min.css",
-                "brandOverride": "https://raw.githubusercontent.com/edly-io/brand-openedx/refs/heads/ulmo/indigo/dist/light.min.css",
+                "default": "http://localhost:2000/static/paragon/themes/light/light.min.css",
+                "brandOverride": "http://localhost:2000/static/paragon/themes/light/light.min.css",
             },
         },
         "dark": {
             "urls": {
-                "default": "https://raw.githubusercontent.com/edly-io/brand-openedx/refs/heads/ulmo/indigo/dist/dark.min.css",
-                "brandOverride": "https://raw.githubusercontent.com/edly-io/brand-openedx/refs/heads/ulmo/indigo/dist/dark.min.css",
+                "default": "http://localhost:2000/static/paragon/themes/dark/dark.min.css",
+                "brandOverride": "http://localhost:2000/static/paragon/themes/dark/dark.min.css",
             }
         },
     }
