@@ -74,6 +74,7 @@ const CUSTOM_HEADER_CSS = `
     padding: 0.25rem 0;
     border-bottom: 2px solid transparent;
     white-space: nowrap;
+    display: none;
   }
   .indigo-custom-header__nav-link:hover,
   .indigo-custom-header__nav-link:focus,
